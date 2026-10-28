@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+venv/
+.venv/
+*.egg-info/
+build/
+dist/
+.DS_Store
+# reports you generate for real clients stay private
+reports/
+client_*.md
+client_*.json

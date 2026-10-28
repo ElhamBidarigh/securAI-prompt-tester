@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "securai-prompt-tester"
+version = "0.1.0"
+description = "Quick prompt injection resistance check for LLM-powered apps. Part of the SecurAI toolkit."
+requires-python = ">=3.10"
+authors = [{name = "Ellie Bidarigh"}]
+readme = "README.md"
+license = {text = "MIT"}
+
+[project.scripts]
+prompt-tester = "prompt_tester.cli:main"
+securai-prompt-tester = "prompt_tester.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["prompt_tester*"]
