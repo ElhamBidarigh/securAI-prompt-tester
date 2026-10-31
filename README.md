@@ -1,5 +1,7 @@
 # 🧪 SecurAI Prompt Tester
 
+[![Tests](https://github.com/ElhamBidarigh/securAI-prompt-tester/actions/workflows/tests.yml/badge.svg)](https://github.com/ElhamBidarigh/securAI-prompt-tester/actions/workflows/tests.yml)
+
 🇮🇷 [راهنمای فارسی](README.fa.md)
 
 A quick prompt injection resistance check for LLM-powered apps. Point it at a chat endpoint, it sends 21 safe, well-known attack prompts, and it writes a plain-language report with a 0 to 100 resistance score.
