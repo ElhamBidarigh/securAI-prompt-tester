@@ -1,15 +1,33 @@
 [build-system]
-requires = ["setuptools>=68.0"]
+requires = ["setuptools>=77.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "securai-prompt-tester"
-version = "0.1.0"
+version = "0.2.0"
 description = "Quick prompt injection resistance check for LLM-powered apps. Part of the SecurAI toolkit."
-requires-python = ">=3.10"
-authors = [{name = "Ellie Bidarigh"}]
 readme = "README.md"
-license = {text = "MIT"}
+requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{name = "Ellie Bidarigh"}]
+keywords = ["prompt-injection", "llm-security", "ai-security", "red-teaming", "security-testing", "sarif"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Information Technology",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Security",
+    "Environment :: Console",
+]
+
+[project.urls]
+Homepage = "https://github.com/ElhamBidarigh/securAI-prompt-tester"
+Issues = "https://github.com/ElhamBidarigh/securAI-prompt-tester/issues"
+Changelog = "https://github.com/ElhamBidarigh/securAI-prompt-tester/blob/main/CHANGELOG.md"
 
 [project.scripts]
 prompt-tester = "prompt_tester.cli:main"

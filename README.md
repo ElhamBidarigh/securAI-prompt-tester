@@ -38,6 +38,8 @@ python -m prompt_tester --help          # works with no install at all
 pip install -e .
 ```
 
+You can also install straight from GitHub: `pip install "git+https://github.com/ElhamBidarigh/securAI-prompt-tester.git"`.
+
 Requires Python 3.10 or newer. There are no third-party dependencies.
 
 ## Try it in 30 seconds (no API key)
@@ -69,53 +71,27 @@ python -m prompt_tester scan --url https://your-app.example.com/v1/chat --author
   --response-path output.text
 ```
 
-### Example: OpenAI-compatible API
+## Test a hosted model in one command
+
+Use `--preset openai` or `--preset anthropic` to test a model API directly, with a system prompt of your choice. No JSON body to write.
 
 ```bash
+# the key lives only in this terminal window, never in a file or in the report
+export ANTHROPIC_API_KEY="your-key"        # or OPENAI_API_KEY for --preset openai
+
 python -m prompt_tester scan --authorized \
-  --url https://api.openai.com/v1/chat/completions \
-  --header "Authorization: Bearer $OPENAI_API_KEY" \
-  --body-template-file body.json \
-  --response-path choices.0.message.content \
-  --system-marker "a phrase from your system prompt"
+  --preset anthropic --model YOUR_MODEL_NAME \
+  --repeat 3 \
+  --out report.md --json-out report.json
 ```
 
-with `body.json`:
-
-```json
-{
-  "model": "YOUR_MODEL",
-  "messages": [
-    {"role": "system", "content": "YOUR SYSTEM PROMPT"},
-    {"role": "user", "content": "{{prompt}}"}
-  ]
-}
-```
-
-### Example: Anthropic Messages API
-
-```bash
-python -m prompt_tester scan --authorized \
-  --url https://api.anthropic.com/v1/messages \
-  --header "x-api-key: $ANTHROPIC_API_KEY" \
-  --header "anthropic-version: 2023-06-01" \
-  --body-template-file body.json \
-  --response-path content.0.text \
-  --system-marker "a phrase from your system prompt"
-```
-
-with `body.json`:
-
-```json
-{
-  "model": "YOUR_MODEL",
-  "max_tokens": 300,
-  "system": "YOUR SYSTEM PROMPT",
-  "messages": [{"role": "user", "content": "{{prompt}}"}]
-}
-```
-
-A full run is 21 requests per repeat, so it costs a few cents on a hosted model. Language models vary between runs, so use `--repeat 3` for a steadier picture.
+- `--model` is required. Copy the exact name from your provider's documentation.
+- Without `--system-prompt-file`, a built-in support-bot prompt is used ([`examples/system_prompt_baseline.txt`](examples/system_prompt_baseline.txt)) and the leak tests are switched on automatically. To test your own prompt, pass `--system-prompt-file my_prompt.txt --system-marker "a phrase from it"`.
+- To see how much a defensive prompt helps, run the same model twice, once with `examples/system_prompt_baseline.txt` and once with `examples/system_prompt_hardened.txt`.
+- The key is read from `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`, or from the variable you name with `--api-key-env`. It is sent only in the request header and never appears in a report, SARIF file or console output.
+- The result describes the combination of model and system prompt you tested, not the model in general.
+- One run is 21 requests per repeat, so `--repeat 3` is 63 requests, usually a few cents. Language models vary between runs, so repeats give a steadier picture.
+- If the provider rejects a parameter, fall back to `--url`, `--header` and `--body-template-file` and describe the request yourself, as in the section above.
 
 ## Options
 
@@ -131,7 +107,9 @@ A full run is 21 requests per repeat, so it costs a few cents on a hosted model.
 | `--category`, `--only PI-001` | Run a subset |
 | `--payloads file.json` | Use your own payload set |
 | `--repeat N`, `--delay S`, `--timeout S` | Repeats, pause between requests, request timeout |
-| `--out`, `--json-out` | Write the Markdown and JSON reports |
+| `--preset openai/anthropic`, `--model`, `--system-prompt-file`, `--max-tokens`, `--api-key-env` | Test a hosted model API directly |
+| `--out`, `--json-out`, `--sarif-out` | Write the Markdown, JSON and SARIF reports |
+| `--sarif-location FILE` | Repo file the SARIF alerts point at (default README.md) |
 | `--client-name`, `--consultant-name`, `--consultant-contact` | Report header |
 | `--fail-under SCORE` | Exit with code 1 when the score is lower (for CI) |
 
@@ -139,12 +117,39 @@ Exit codes: `0` ok, `1` score below `--fail-under`, `2` usage or authorization e
 
 Other commands: `demo`, `serve-demo`, `list-payloads`.
 
-### Use it in CI
+### GitHub Action and Code Scanning
+
+This repository is also a reusable GitHub Action. It runs the tests against your staging app, uploads the findings to **Security > Code scanning**, writes the report to the job summary, and fails the job when the score drops below a threshold. It refuses to run unless you set `authorized: true`.
 
 ```yaml
-- name: Prompt injection check
-  run: python -m prompt_tester scan --url ${{ secrets.STAGING_CHAT_URL }} --authorized --fail-under 80 --quiet --out report.md
+name: Prompt injection check
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 6 * * 1"
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: ElhamBidarigh/securAI-prompt-tester@v0.2.0
+        with:
+          url: ${{ secrets.STAGING_CHAT_URL }}
+          authorized: true
+          headers: |
+            Authorization: Bearer ${{ secrets.STAGING_CHAT_TOKEN }}
+          system-marker: "a phrase from your system prompt"
+          sarif-location: app/prompts/system.txt
+          fail-under: 80
 ```
+
+Inputs: `url`, `authorized` (required), `fail-under` (default 70, empty to never fail on score), `headers`, `body-template`, `response-path`, `system-marker`, `repeat`, `sarif-location`, `upload-sarif`. Run it on a schedule or on demand rather than on every push, because every run sends real requests to your app.
+
+You can also use the exit code directly in any CI system: `python -m prompt_tester scan --url ... --authorized --fail-under 80 --quiet`.
 
 ## How the score works
 
@@ -171,13 +176,17 @@ This is a first check, not a certification. It covers a fixed set of basic attac
 prompt_tester/
   payloads.py      21 built-in payloads and the loader for custom ones
   detectors.py     deterministic verdict logic
-  target.py        HTTP client, body templates, response extraction
+  target.py        HTTP client, retries, body templates, response extraction
+  presets.py       OpenAI and Anthropic request builders
   runner.py        runs the tests, aggregates, scores
   report.py        Markdown and JSON reports
+  sarif.py         SARIF 2.1.0 export
   demo_server.py   three bundled fake chat apps for demos and tests
   cli.py           command line interface
-tests/             33 tests, standard library only
-examples/          sample reports generated by the demo command
+action.yml         reusable GitHub Action
+tests/             51 tests, standard library only
+examples/          sample reports and two example system prompts
+SECURITY.md, CHANGELOG.md, docs/RELEASING.md
 ```
 
 Run the tests with `python -m unittest discover -s tests -v`.

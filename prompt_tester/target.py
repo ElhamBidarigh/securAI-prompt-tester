@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import socket
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -29,6 +30,8 @@ AUTO_PATHS = [
 ]
 
 LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1", "[::1]"}
+RETRY_STATUSES = {429, 500, 502, 503, 504, 529}
+MAX_RETRY_WAIT = 10.0
 
 
 class TargetError(Exception):
@@ -111,7 +114,10 @@ def extract_text(body: str, response_path: str | None = None) -> str:
 class Target:
     def __init__(self, url: str, method: str = "POST", headers: dict | None = None,
                  body_template: Any = None, response_path: str | None = None,
-                 query_param: str | None = None, timeout: float = 30.0):
+                 query_param: str | None = None, timeout: float = 30.0,
+                 retries: int = 2, retry_wait: float = 1.5):
+        self.retries = max(0, retries)
+        self.retry_wait = retry_wait
         self.url = url
         self.method = method.upper()
         self.headers = dict(headers or {})
@@ -126,28 +132,52 @@ class Target:
         if self.method == "GET" and not self.query_param:
             raise TargetError("GET targets need --query-param (the name of the query parameter that carries the prompt)")
 
-    def send(self, prompt: str) -> TargetResponse:
-        headers = {"User-Agent": "securAI-prompt-tester/0.1", **self.headers}
+    def _build_request(self, prompt: str) -> urllib.request.Request:
+        headers = {"User-Agent": "securAI-prompt-tester/0.2", **self.headers}
         if self.method == "POST":
             payload = json.dumps(fill_template(self.body_template, prompt), ensure_ascii=False).encode("utf-8")
             headers.setdefault("Content-Type", "application/json")
-            req = urllib.request.Request(self.url, data=payload, headers=headers, method="POST")
-        else:
-            sep = "&" if "?" in self.url else "?"
-            url = self.url + sep + urllib.parse.urlencode({self.query_param: prompt})
-            req = urllib.request.Request(url, headers=headers, method="GET")
-        try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
-                body = resp.read().decode("utf-8", errors="replace")
-                status = resp.status
-        except urllib.error.HTTPError as e:
-            return TargetResponse(http_status=e.code, error=f"HTTP {e.code}")
-        except urllib.error.URLError as e:
-            return TargetResponse(error=f"connection failed: {e.reason}")
-        except (socket.timeout, TimeoutError):
-            return TargetResponse(error=f"timed out after {self.timeout}s")
-        except OSError as e:
-            return TargetResponse(error=f"network error: {e}")
+            return urllib.request.Request(self.url, data=payload, headers=headers, method="POST")
+        sep = "&" if "?" in self.url else "?"
+        url = self.url + sep + urllib.parse.urlencode({self.query_param: prompt})
+        return urllib.request.Request(url, headers=headers, method="GET")
+
+    def _wait_before_retry(self, attempt: int, retry_after: str | None) -> None:
+        wait = self.retry_wait * (attempt + 1)
+        if retry_after:
+            try:
+                wait = max(wait, float(retry_after))
+            except ValueError:
+                pass
+        time.sleep(min(wait, MAX_RETRY_WAIT))
+
+    def send(self, prompt: str) -> TargetResponse:
+        """Send one prompt. Rate limits and temporary server errors are retried a few times."""
+        attempt = 0
+        while True:
+            req = self._build_request(prompt)
+            try:
+                with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                    body = resp.read().decode("utf-8", errors="replace")
+                    status = resp.status
+                break
+            except urllib.error.HTTPError as e:
+                if e.code in RETRY_STATUSES and attempt < self.retries:
+                    self._wait_before_retry(attempt, e.headers.get("Retry-After") if e.headers else None)
+                    attempt += 1
+                    continue
+                detail = ""
+                try:
+                    detail = e.read().decode("utf-8", errors="replace").strip().replace("\n", " ")[:300]
+                except Exception:
+                    pass
+                return TargetResponse(http_status=e.code, error=f"HTTP {e.code}" + (f": {detail}" if detail else ""))
+            except urllib.error.URLError as e:
+                return TargetResponse(error=f"connection failed: {e.reason}")
+            except (socket.timeout, TimeoutError):
+                return TargetResponse(error=f"timed out after {self.timeout}s")
+            except OSError as e:
+                return TargetResponse(error=f"network error: {e}")
         try:
             text = extract_text(body, self.response_path)
         except TargetError as e:

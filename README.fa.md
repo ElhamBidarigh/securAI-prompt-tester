@@ -58,6 +58,15 @@ python -m prompt_tester scan \
 
 مثال‌های OpenAI و Anthropic و همه‌ی گزینه‌ها در [README انگلیسی](README.md) آمده است.
 
+## تست مستقیم یک مدل واقعی
+
+```bash
+export ANTHROPIC_API_KEY="your-key"     # یا OPENAI_API_KEY برای --preset openai
+python -m prompt_tester scan --authorized --preset anthropic --model YOUR_MODEL_NAME --repeat 3 --out report.md
+```
+
+کلید فقط در همین پنجره‌ی ترمینال می‌ماند و هرگز در گزارش یا خروجی چاپ نمی‌شود. نتیجه درباره‌ی ترکیب «مدل و system prompt ای که تست کردی» است، نه خود مدل به‌طور کلی. جزئیات کامل، خروجی SARIF و GitHub Action در [README انگلیسی](README.md) آمده است.
+
 ## محدودیت‌ها
 
 این یک بررسی اولیه است، نه گواهی امنیت. مجموعه‌ی ثابتی از حمله‌های پایه را پوشش می‌دهد، رشته‌ها را تطبیق می‌دهد و معنا را قضاوت نمی‌کند، و مدل‌ها در هر اجرا ممکن است پاسخ متفاوتی بدهند. امتیاز بالا یعنی اپ این حمله‌ها را تحمل کرده، نه اینکه در برابر مهاجم مصمم امن است.

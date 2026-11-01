@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -17,8 +18,11 @@ from pathlib import Path
 from . import __version__
 from .demo_server import DEMO_APPS, SYSTEM_MARKER, start_demo_server, stop_demo_server
 from .payloads import CATEGORIES, load_payloads
+from .presets import (DEFAULT_ENV, DEMO_SYSTEM_MARKER, DEMO_SYSTEM_PROMPT, PRESET_NAMES, PresetError,
+                      build_preset)
 from .report import to_json, to_markdown
 from .runner import counts, rating, run_tests, score
+from .sarif import to_sarif_json
 from .target import Target, TargetError, is_local_url
 
 
@@ -31,7 +35,16 @@ def build_parser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(dest="command", required=True)
 
     s = sub.add_parser("scan", help="Test an LLM app over HTTP.")
-    s.add_argument("--url", required=True, help="Endpoint of the app, for example https://myapp.com/api/chat")
+    s.add_argument("--url", default=None,
+                   help="Endpoint of the app, for example https://myapp.com/api/chat. Optional with --preset.")
+    s.add_argument("--preset", choices=PRESET_NAMES, default=None,
+                   help="Test a hosted model API directly. The key is read from OPENAI_API_KEY or ANTHROPIC_API_KEY.")
+    s.add_argument("--model", default=None, help="Model name for --preset (copy it from your provider's docs).")
+    s.add_argument("--system-prompt-file", default=None,
+                   help="Text file with the system prompt to test with --preset. Default: a built-in support-bot prompt.")
+    s.add_argument("--max-tokens", type=int, default=300, help="Reply length limit for --preset. Default 300.")
+    s.add_argument("--api-key-env", default=None, metavar="NAME",
+                   help="Name of the environment variable that holds the API key (default depends on --preset).")
     s.add_argument("--method", default="POST", choices=["POST", "GET"])
     s.add_argument("--header", action="append", default=[], metavar="'Name: value'",
                    help="Extra HTTP header, for example 'Authorization: Bearer TOKEN'. Repeatable.")
@@ -53,6 +66,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Confirm you own this app or have written permission to test it. Required for non-local URLs.")
     s.add_argument("--out", default=None, help="Write the Markdown report to this file.")
     s.add_argument("--json-out", default=None, help="Write the JSON report to this file.")
+    s.add_argument("--sarif-out", default=None, help="Write a SARIF 2.1.0 file (for GitHub Code Scanning).")
+    s.add_argument("--sarif-location", default="README.md",
+                   help="Repo file the SARIF alerts point at, ideally your system prompt or chat handler. Default README.md.")
     s.add_argument("--client-name", default="")
     s.add_argument("--consultant-name", default="")
     s.add_argument("--consultant-contact", default="")
@@ -106,17 +122,44 @@ def _progress(quiet: bool):
     return show
 
 
+def _resolve_target(args):
+    """Build the Target and the list of system markers from the arguments."""
+    markers = list(args.system_marker)
+    if args.preset:
+        env_name = args.api_key_env or DEFAULT_ENV[args.preset]
+        api_key = os.environ.get(env_name, "").strip()
+        if not api_key:
+            raise PresetError(f"environment variable {env_name} is empty or not set. In Git Bash run:  "
+                              f"export {env_name}=your-key   (it lasts only for this terminal window)")
+        if args.system_prompt_file:
+            system_prompt = Path(args.system_prompt_file).read_text(encoding="utf-8").strip()
+        else:
+            system_prompt = DEMO_SYSTEM_PROMPT
+            if DEMO_SYSTEM_MARKER not in markers:
+                markers.append(DEMO_SYSTEM_MARKER)
+        cfg = build_preset(args.preset, args.model, system_prompt, api_key,
+                           max_tokens=args.max_tokens, url=args.url)
+        target = Target(cfg.url, headers=cfg.headers, body_template=cfg.body_template,
+                        response_path=cfg.response_path, timeout=args.timeout)
+        return target, cfg.url, markers
+    if not args.url:
+        raise TargetError("give --url, or use --preset openai / --preset anthropic")
+    target = Target(args.url, method=args.method, headers=_parse_headers(args.header),
+                    body_template=_load_template(args), response_path=args.response_path,
+                    query_param=args.query_param, timeout=args.timeout)
+    return target, args.url, markers
+
+
 def cmd_scan(args) -> int:
-    if not is_local_url(args.url) and not args.authorized:
-        print("error: this URL is not local. Add --authorized to confirm you own the app or have written "
-              "permission to test it.", file=sys.stderr)
+    url_to_check = args.url or (args.preset and "https://hosted-model-api.invalid")
+    if url_to_check and not is_local_url(url_to_check) and not args.authorized:
+        print("error: this URL is not local. Add --authorized to confirm you own the app or the API account, "
+              "or have written permission to test it.", file=sys.stderr)
         return 2
     try:
-        target = Target(args.url, method=args.method, headers=_parse_headers(args.header),
-                        body_template=_load_template(args), response_path=args.response_path,
-                        query_param=args.query_param, timeout=args.timeout)
+        target, label, markers = _resolve_target(args)
         payloads = load_payloads(args.payloads, args.category or None, args.only or None)
-    except (TargetError, ValueError, OSError) as e:
+    except (TargetError, PresetError, ValueError, OSError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 2
     if not payloads:
@@ -124,8 +167,10 @@ def cmd_scan(args) -> int:
         return 2
 
     results = run_tests(target, payloads, repeat=args.repeat, delay=args.delay,
-                        markers=args.system_marker, progress=_progress(args.quiet))
-    return _finish(args.url, results, args)
+                        markers=markers, progress=_progress(args.quiet))
+    if args.preset:
+        label = f"{args.preset} model '{args.model}' with a {'custom' if args.system_prompt_file else 'built-in'} system prompt"
+    return _finish(label, results, args)
 
 
 def _finish(label: str, results, args) -> int:
@@ -135,6 +180,9 @@ def _finish(label: str, results, args) -> int:
         Path(args.out).write_text(md, encoding="utf-8")
     if getattr(args, "json_out", None):
         Path(args.json_out).write_text(to_json(label, results), encoding="utf-8")
+    if getattr(args, "sarif_out", None) and value is not None:  # an empty file would wrongly close existing alerts
+        Path(args.sarif_out).write_text(
+            to_sarif_json(label, results, __version__, getattr(args, "sarif_location", "README.md")), encoding="utf-8")
     if not getattr(args, "out", None):
         print(md)
     c = counts(results)
@@ -142,7 +190,9 @@ def _finish(label: str, results, args) -> int:
     print(f"\n[prompt-tester] score {shown} ({rating(value)}), vulnerable={c['vulnerable']} "
           f"review={c['review']} resisted={c['resisted']} skipped={c['skipped']} errors={c['error']}", file=sys.stderr)
     if value is None:
-        print("[prompt-tester] nothing could be tested. Check the URL, headers and body template.", file=sys.stderr)
+        first = next((r.error for r in results if r.error), "")
+        print("[prompt-tester] nothing could be tested. Check the URL, headers and body template."
+              + (f" First error: {first}" if first else ""), file=sys.stderr)
         return 3
     fail_under = getattr(args, "fail_under", None)
     if fail_under is not None and value < fail_under:
