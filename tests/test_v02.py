@@ -26,8 +26,9 @@ REFUSAL = "I can only help with Acme products and I can't follow instructions in
 class FakeApi:
     """A tiny local server that speaks the OpenAI or Anthropic response shape and records requests."""
 
-    def __init__(self, shape, fail_first=0, fail_status=429, error_body=None):
+    def __init__(self, shape, fail_first=0, fail_status=429, error_body=None, reply=None):
         self.shape = shape
+        self.reply = REFUSAL if reply is None else reply
         self.requests = []
         self.fail_first = fail_first
         self.fail_status = fail_status
@@ -50,7 +51,7 @@ class FakeApi:
                     self.wfile.write(payload)
                     return
                 if outer.shape == "openai":
-                    obj = {"choices": [{"message": {"role": "assistant", "content": REFUSAL}}]}
+                    obj = {"choices": [{"message": {"role": "assistant", "content": outer.reply}}]}
                 else:
                     obj = {"content": [{"type": "text", "text": REFUSAL}]}
                 payload = json.dumps(obj).encode()
@@ -227,6 +228,60 @@ class TestRetriesAndErrors(unittest.TestCase):
         resp = t.send("hello")
         self.assertIn("bad request", resp.error)
         self.assertEqual(len(api.requests), 1)
+
+
+class TestOpenAICompatible(unittest.TestCase):
+    def test_request_shape_uses_max_tokens_and_bearer_key(self):
+        cfg = build_preset("openai-compatible", "m", "SYS", "KEY", max_tokens=77, url="http://x/chat/completions")
+        self.assertEqual(cfg.url, "http://x/chat/completions")
+        self.assertEqual(cfg.headers["Authorization"], "Bearer KEY")
+        self.assertEqual(cfg.body_template["max_tokens"], 77)
+        self.assertNotIn("max_completion_tokens", cfg.body_template)
+        self.assertEqual(cfg.response_path, "choices.0.message.content")
+
+    def test_url_is_required(self):
+        with self.assertRaises(PresetError):
+            build_preset("openai-compatible", "m", "S", "K")
+
+    def test_end_to_end_with_custom_key_variable(self):
+        api = FakeApi("openai")
+        self.addCleanup(api.close)
+        tmp = tempfile.mkdtemp()
+        code, _, _ = run_cli("scan", "--preset", "openai-compatible", "--model", "free-model", "--url", api.url,
+                             "--api-key-env", "FREE_KEY", "--authorized", "--delay", "0", "--quiet",
+                             "--out", os.path.join(tmp, "r.md"), env={"FREE_KEY": "free-key-1"})
+        self.assertEqual(code, 0)
+        first = api.requests[0]
+        self.assertEqual(header(first["headers"], "Authorization"), "Bearer free-key-1")
+        self.assertEqual(first["body"]["max_tokens"], 300)
+        self.assertEqual(len(api.requests), 21)
+
+    def test_missing_url_is_a_clean_cli_error(self):
+        code, _, err = run_cli("scan", "--preset", "openai-compatible", "--model", "m", "--authorized", "--quiet",
+                               env={"LLM_API_KEY": "k"})
+        self.assertEqual(code, 2)
+        self.assertIn("--url", err)
+
+
+class TestEmptyReplies(unittest.TestCase):
+    def test_empty_reply_is_an_error_not_a_pass(self):
+        api = FakeApi("openai", reply="")
+        self.addCleanup(api.close)
+        cfg = build_preset("openai-compatible", "m", "S", "K", url=api.url)
+        resp = Target(cfg.url, headers=cfg.headers, body_template=cfg.body_template,
+                      response_path=cfg.response_path).send("hi")
+        self.assertIsNone(resp.text)
+        self.assertIn("--max-tokens", resp.error)
+
+    def test_all_empty_replies_exit_with_3_and_show_the_hint(self):
+        api = FakeApi("openai", reply="")
+        self.addCleanup(api.close)
+        tmp = tempfile.mkdtemp()
+        code, _, err = run_cli("scan", "--preset", "openai-compatible", "--model", "m", "--url", api.url,
+                               "--authorized", "--delay", "0", "--quiet", "--only", "PI-001",
+                               "--out", os.path.join(tmp, "r.md"), env={"LLM_API_KEY": "k"})
+        self.assertEqual(code, 3)
+        self.assertIn("--max-tokens", err)
 
 
 class TestSarif(unittest.TestCase):

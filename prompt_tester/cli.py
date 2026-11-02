@@ -38,7 +38,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--url", default=None,
                    help="Endpoint of the app, for example https://myapp.com/api/chat. Optional with --preset.")
     s.add_argument("--preset", choices=PRESET_NAMES, default=None,
-                   help="Test a hosted model API directly. The key is read from OPENAI_API_KEY or ANTHROPIC_API_KEY.")
+                   help="Test a hosted model API directly. The key is read from OPENAI_API_KEY or ANTHROPIC_API_KEY, or from the "
+                        "variable named by --api-key-env. Use openai-compatible with --url for Gemini, OpenRouter, Groq, DeepSeek and others.")
     s.add_argument("--model", default=None, help="Model name for --preset (copy it from your provider's docs).")
     s.add_argument("--system-prompt-file", default=None,
                    help="Text file with the system prompt to test with --preset. Default: a built-in support-bot prompt.")

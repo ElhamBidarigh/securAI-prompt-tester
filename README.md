@@ -91,7 +91,33 @@ python -m prompt_tester scan --authorized \
 - The key is read from `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`, or from the variable you name with `--api-key-env`. It is sent only in the request header and never appears in a report, SARIF file or console output.
 - The result describes the combination of model and system prompt you tested, not the model in general.
 - One run is 21 requests per repeat, so `--repeat 3` is 63 requests, usually a few cents. Language models vary between runs, so repeats give a steadier picture.
+- `--preset openai-compatible --url ...` works with any provider that copies the OpenAI chat format, including several with free tiers (see the next section).
 - If the provider rejects a parameter, fall back to `--url`, `--header` and `--body-template-file` and describe the request yourself, as in the section above.
+
+### Free providers (no payment)
+
+Several providers offer a free tier, which is enough for this tool (21 requests per repeat). Free tiers change often, so check the provider's own page for current limits, supported countries and model names.
+
+| Provider | Chat completions address | Notes |
+|---|---|---|
+| Google Gemini API | `https://generativelanguage.googleapis.com/v1beta/openai/chat/completions` | Free tier in Google AI Studio. Copy the exact model name from AI Studio. |
+| OpenRouter | `https://openrouter.ai/api/v1/chat/completions` | Models whose name ends in `:free`. Small daily request cap on the free tier. |
+| Groq | `https://api.groq.com/openai/v1/chat/completions` | Free tier with per-model limits, may ask for phone verification. |
+| DeepSeek | `https://api.deepseek.com/chat/completions` | Not free, but very cheap pay-as-you-go. |
+
+```bash
+export LLM_API_KEY="your-free-key"      # or any name, then add --api-key-env NAME
+
+python -m prompt_tester scan --authorized --preset openai-compatible \
+  --url https://generativelanguage.googleapis.com/v1beta/openai/chat/completions \
+  --model MODEL_NAME --max-tokens 1500 --delay 3 --out report.md
+```
+
+Tips for free tiers
+- Free tiers limit requests per minute, so add `--delay 3` (or more). A daily cap may require `--repeat 1` and splitting runs over two days.
+- Reasoning models spend part of `--max-tokens` on thinking. If you see "the reply text was empty", raise `--max-tokens`.
+- Free tiers may use your prompts to improve their products. The payloads here are synthetic, but never send real secrets or customer data.
+- Keep the key in an environment variable. Never commit it.
 
 ## Options
 
@@ -107,7 +133,7 @@ python -m prompt_tester scan --authorized \
 | `--category`, `--only PI-001` | Run a subset |
 | `--payloads file.json` | Use your own payload set |
 | `--repeat N`, `--delay S`, `--timeout S` | Repeats, pause between requests, request timeout |
-| `--preset openai/anthropic`, `--model`, `--system-prompt-file`, `--max-tokens`, `--api-key-env` | Test a hosted model API directly |
+| `--preset openai/anthropic/openai-compatible`, `--model`, `--system-prompt-file`, `--max-tokens`, `--api-key-env` | Test a hosted model API directly |
 | `--out`, `--json-out`, `--sarif-out` | Write the Markdown, JSON and SARIF reports |
 | `--sarif-location FILE` | Repo file the SARIF alerts point at (default README.md) |
 | `--client-name`, `--consultant-name`, `--consultant-contact` | Report header |

@@ -100,6 +100,9 @@ def extract_text(body: str, response_path: str | None = None) -> str:
             value = _walk(data, response_path)
         except KeyError:
             raise TargetError(f"response path '{response_path}' was not found in the JSON response")
+        if value is None or (isinstance(value, str) and not value.strip()):
+            raise TargetError("the reply text was empty. Reasoning models can use the whole token limit while "
+                              "thinking, so try a larger --max-tokens (for example 1500)")
         return value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
     for path in AUTO_PATHS:
         try:
