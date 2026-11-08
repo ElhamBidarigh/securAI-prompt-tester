@@ -16,7 +16,7 @@ from prompt_tester import __version__, cli
 from prompt_tester.demo_server import SYSTEM_MARKER, start_demo_server, stop_demo_server
 from prompt_tester.payloads import load_payloads
 from prompt_tester.presets import PresetError, build_preset
-from prompt_tester.runner import run_tests
+from prompt_tester.runner import TestResult, coverage, is_incomplete, run_tests
 from prompt_tester.sarif import to_sarif
 from prompt_tester.target import Target
 
@@ -340,6 +340,72 @@ class TestDroppedConnections(unittest.TestCase):
         self.assertEqual(code, 0)
         data = json.loads(Path(tmp, "r.json").read_text(encoding="utf-8"))
         self.assertEqual(data["results"][0]["status"], "resisted")
+
+
+class TestIncompleteRuns(unittest.TestCase):
+    """A run where most tests failed to run must not look like a good score."""
+
+    def scan(self, api, *extra):
+        tmp = tempfile.mkdtemp()
+        argv = ["scan", "--preset", "openai-compatible", "--model", "m", "--url", api.url, "--authorized",
+                "--delay", "0", "--retries", "0", "--quiet", "--out", os.path.join(tmp, "r.md"),
+                "--json-out", os.path.join(tmp, "r.json"), "--sarif-out", os.path.join(tmp, "r.sarif"), *extra]
+        code, out, err = run_cli(*argv, env={"LLM_API_KEY": "k"})
+        return tmp, code, err
+
+    def test_three_of_twenty_one_is_incomplete_not_a_perfect_score(self):
+        api = FakeApi("openai", fail_first=18, fail_status=400)
+        self.addCleanup(api.close)
+        tmp, code, err = self.scan(api)
+        self.assertEqual(code, 3)
+        self.assertIn("INCOMPLETE", err)
+        self.assertIn("only 3 of 21", err)
+        data = json.loads(Path(tmp, "r.json").read_text(encoding="utf-8"))
+        self.assertTrue(data["incomplete"])
+        self.assertEqual(data["rating"], "Incomplete")
+        self.assertEqual(data["coverage"], {"ran": 3, "total": 21})
+        md = Path(tmp, "r.md").read_text(encoding="utf-8")
+        self.assertIn("INCOMPLETE RUN: only 3 of 21 tests could run", md)
+        self.assertNotIn("(Strong)", md)
+        self.assertFalse(Path(tmp, "r.sarif").exists())
+
+    def test_gate_cannot_pass_on_an_incomplete_run(self):
+        api = FakeApi("openai", fail_first=18, fail_status=400)
+        self.addCleanup(api.close)
+        _, code, _ = self.scan(api, "--fail-under", "50")
+        self.assertEqual(code, 3)
+
+    def test_min_coverage_zero_turns_the_check_off(self):
+        api = FakeApi("openai", fail_first=18, fail_status=400)
+        self.addCleanup(api.close)
+        tmp, code, _ = self.scan(api, "--min-coverage", "0")
+        self.assertEqual(code, 0)
+        self.assertFalse(json.loads(Path(tmp, "r.json").read_text(encoding="utf-8"))["incomplete"])
+
+    def test_a_few_errors_do_not_make_a_run_incomplete(self):
+        api = FakeApi("openai", fail_first=2, fail_status=400)  # 19 of 21 ran
+        self.addCleanup(api.close)
+        tmp, code, _ = self.scan(api)
+        self.assertEqual(code, 0)
+        data = json.loads(Path(tmp, "r.json").read_text(encoding="utf-8"))
+        self.assertFalse(data["incomplete"])
+        self.assertEqual(data["coverage"], {"ran": 19, "total": 21})
+        self.assertTrue(Path(tmp, "r.sarif").exists())
+
+    def test_rate_limit_hint_is_printed(self):
+        api = FakeApi("openai", fail_first=100, fail_status=429)
+        self.addCleanup(api.close)
+        _, code, err = self.scan(api, "--only", "PI-001")
+        self.assertEqual(code, 3)
+        self.assertIn("rate limiting", err)
+
+    def test_skipped_leak_tests_do_not_count_against_coverage(self):
+        results = [TestResult(id="a", name="a", category="direct-override", severity="high", status="resisted"),
+                   TestResult(id="b", name="b", category="system-prompt-extraction", severity="high", status="skipped")]
+        self.assertEqual(coverage(results), (1, 1))
+        self.assertFalse(is_incomplete(results))
+        self.assertTrue(is_incomplete([TestResult(id="a", name="a", category="direct-override",
+                                                  severity="high", status="error")]))
 
 
 class TestSarif(unittest.TestCase):

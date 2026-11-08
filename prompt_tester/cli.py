@@ -21,7 +21,7 @@ from .payloads import CATEGORIES, load_payloads
 from .presets import (DEFAULT_ENV, DEMO_SYSTEM_MARKER, DEMO_SYSTEM_PROMPT, PRESET_NAMES, PresetError,
                       build_preset)
 from .report import to_json, to_markdown
-from .runner import counts, rating, run_tests, score
+from .runner import DEFAULT_MIN_COVERAGE, counts, coverage, is_incomplete, rating, run_tests, score
 from .sarif import to_sarif_json
 from .target import Target, TargetError, is_local_url
 
@@ -77,6 +77,9 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--client-name", default="")
     s.add_argument("--consultant-name", default="")
     s.add_argument("--consultant-contact", default="")
+    s.add_argument("--min-coverage", type=float, default=DEFAULT_MIN_COVERAGE, metavar="FRACTION",
+                   help="The run counts as incomplete (exit code 3, no SARIF) when fewer than this share of tests could "
+                        "run, for example because of network or rate limit errors. Default 0.8, use 0 to turn off.")
     s.add_argument("--fail-under", type=int, default=None, metavar="SCORE",
                    help="Exit with code 1 if the score is below this number (for CI).")
     s.add_argument("--quiet", action="store_true", help="No progress lines.")
@@ -183,28 +186,41 @@ def cmd_scan(args) -> int:
 
 def _finish(label: str, results, args) -> int:
     value = score(results)
-    md = to_markdown(label, results, args.client_name, args.consultant_name, args.consultant_contact)
+    min_cov = getattr(args, "min_coverage", DEFAULT_MIN_COVERAGE)
+    incomplete = is_incomplete(results, min_cov)
+    ran, total = coverage(results)
+    md = to_markdown(label, results, args.client_name, args.consultant_name, args.consultant_contact,
+                     min_coverage=min_cov)
     if getattr(args, "out", None):
         Path(args.out).write_text(md, encoding="utf-8")
     if getattr(args, "json_out", None):
-        Path(args.json_out).write_text(to_json(label, results), encoding="utf-8")
-    if getattr(args, "sarif_out", None) and value is not None:  # an empty file would wrongly close existing alerts
+        Path(args.json_out).write_text(to_json(label, results, min_coverage=min_cov), encoding="utf-8")
+    # an empty or partial SARIF file would wrongly close existing alerts, so write it only for complete runs
+    if getattr(args, "sarif_out", None) and value is not None and not incomplete:
         Path(args.sarif_out).write_text(
             to_sarif_json(label, results, __version__, getattr(args, "sarif_location", "README.md")), encoding="utf-8")
     if not getattr(args, "out", None):
         print(md)
     c = counts(results)
     shown = "n/a" if value is None else f"{value}/100"
-    print(f"\n[prompt-tester] score {shown} ({rating(value)}), vulnerable={c['vulnerable']} "
+    extra = f", only {ran} of {total} tests ran" if incomplete and value is not None else ""
+    print(f"\n[prompt-tester] score {shown} ({rating(value, incomplete)}{extra}), vulnerable={c['vulnerable']} "
           f"review={c['review']} resisted={c['resisted']} skipped={c['skipped']} errors={c['error']}", file=sys.stderr)
+    first = next((r.error for r in results if r.error), "")
     if value is None:
-        first = next((r.error for r in results if r.error), "")
         print("[prompt-tester] nothing could be tested. Check the URL, headers and body template."
               + (f" First error: {first}" if first else ""), file=sys.stderr)
-        if any(w in first for w in ("network error", "connection failed", "timed out")):
-            print("[prompt-tester] This looks like a network problem, not a problem with the app. Try "
-                  "--delay 5 --retries 4, and check whether a proxy is set: "
-                  "python -c \"import urllib.request as u; print(u.getproxies())\"", file=sys.stderr)
+    elif incomplete:
+        print(f"[prompt-tester] INCOMPLETE: {total - ran} of {total} tests failed to run, so this score is not reliable "
+              f"and no SARIF file was written. First error: {first}", file=sys.stderr)
+    if (value is None or incomplete) and any(w in first for w in ("network error", "connection failed", "timed out")):
+        print("[prompt-tester] This looks like a network problem, not a problem with the app. Try "
+              "--delay 5 --retries 4, and check whether a proxy is set: "
+              "python -c \"import urllib.request as u; print(u.getproxies())\"", file=sys.stderr)
+    if (value is None or incomplete) and "429" in first:
+        print("[prompt-tester] The provider is rate limiting you. Use a larger --delay, or try again later or "
+              "with another model.", file=sys.stderr)
+    if value is None or incomplete:
         return 3
     fail_under = getattr(args, "fail_under", None)
     if fail_under is not None and value < fail_under:

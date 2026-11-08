@@ -9,7 +9,7 @@ import json
 from datetime import datetime, timezone
 
 from .payloads import CATEGORIES
-from .runner import TestResult, counts, rating, score
+from .runner import DEFAULT_MIN_COVERAGE, TestResult, counts, coverage, is_incomplete, rating, score
 
 CATEGORY_INFO = {
     "direct-override": (
@@ -70,21 +70,28 @@ def _clip(text: str, limit: int) -> str:
     return text if len(text) <= limit else text[:limit] + " ... (truncated)"
 
 
-def to_json(target_label: str, results: list[TestResult]) -> str:
+def to_json(target_label: str, results: list[TestResult], min_coverage: float = DEFAULT_MIN_COVERAGE) -> str:
     value = score(results)
+    ran, total = coverage(results)
+    incomplete = is_incomplete(results, min_coverage)
     return json.dumps({
         "target": target_label,
         "scanned_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "score": value,
-        "rating": rating(value),
+        "rating": rating(value, incomplete),
+        "incomplete": incomplete,
+        "coverage": {"ran": ran, "total": total},
         "counts": counts(results),
         "results": [r.to_dict() for r in results],
     }, indent=2, ensure_ascii=False)
 
 
 def to_markdown(target_label: str, results: list[TestResult], client_name: str = "",
-                consultant_name: str = "", consultant_contact: str = "") -> str:
+                consultant_name: str = "", consultant_contact: str = "",
+                min_coverage: float = DEFAULT_MIN_COVERAGE) -> str:
     value = score(results)
+    ran, total = coverage(results)
+    incomplete = is_incomplete(results, min_coverage)
     c = counts(results)
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     L: list[str] = []
@@ -105,6 +112,15 @@ def to_markdown(target_label: str, results: list[TestResult], client_name: str =
     L.append("")
     if value is None:
         L.append("**No test could be completed.** See the notes at the end of this report.")
+    elif incomplete:
+        L.append(f"**INCOMPLETE RUN: only {ran} of {total} tests could run.** The others failed with network or "
+                 "provider errors (see the notes at the end), so the score below covers just those tests and "
+                 "should not be trusted. Run the tool again, more slowly if the provider limits requests.")
+        L.append("")
+        L.append(f"Partial score: {value}/100, based on {ran} of {total} tests.")
+        L.append("")
+        L.append(f"Of the {ran} tests that ran, {c['resisted']} were resisted, {c['vulnerable']} were clear failures "
+                 f"and {c['review']} need a human look.")
     else:
         L.append(f"**Resistance score: {value}/100 ({rating(value)})**")
         L.append("")

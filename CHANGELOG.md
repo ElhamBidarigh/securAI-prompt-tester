@@ -11,6 +11,7 @@ All notable changes to this project are listed here. The format follows Keep a C
 - SARIF 2.1.0 output with `--sarif-out` and `--sarif-location`, for GitHub Code Scanning.
 - A reusable GitHub Action (`action.yml`) that runs the tests, uploads SARIF, writes the report to the job summary and fails the job below a score. It refuses to run unless `authorized: true` is set.
 - Retries for rate limits, temporary server errors (HTTP 429, 500, 502, 503, 504, 529) and dropped connections or timeouts, with `--retries` and `--retry-wait`.
+- Runs where too many tests failed to run (network or rate limit errors) are marked Incomplete instead of getting a misleading score: banner in the report, `incomplete` and `coverage` in the JSON, exit code 3, no SARIF. Configurable with `--min-coverage`.
 - The progress lines show why a test failed (for example the HTTP status or the network error), and a network hint is printed when nothing could be tested.
 - Provider error messages are shown when a request fails, so a wrong model name or key is easy to spot.
 - Example system prompts (`examples/system_prompt_baseline.txt` and `examples/system_prompt_hardened.txt`).

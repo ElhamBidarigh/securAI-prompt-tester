@@ -131,7 +131,7 @@ runs:
           echo "::error::The resistance score is below fail-under. See the job summary for details."
           exit 1
         elif [ "$code" = "3" ]; then
-          echo "::error::Nothing could be tested. Check the url, headers and body template."
+          echo "::error::Nothing could be tested, or too many tests failed to run (network or rate limit errors). Check the url, headers and body template, and the job summary."
           exit 1
         else
           echo "::error::The check could not run (exit code $code)."

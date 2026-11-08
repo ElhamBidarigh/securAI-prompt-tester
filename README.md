@@ -133,6 +133,7 @@ Tips for free tiers
 | `--category`, `--only PI-001` | Run a subset |
 | `--payloads file.json` | Use your own payload set |
 | `--repeat N`, `--delay S`, `--timeout S` | Repeats, pause between requests, request timeout |
+| `--min-coverage FRACTION` | Mark the run incomplete when fewer tests than this share could run (default 0.8) |
 | `--retries N`, `--retry-wait S` | Retries after a rate limit, server error or dropped connection (default 2, 1.5 s) |
 | `--preset openai/anthropic/openai-compatible`, `--model`, `--system-prompt-file`, `--max-tokens`, `--api-key-env` | Test a hosted model API directly |
 | `--out`, `--json-out`, `--sarif-out` | Write the Markdown, JSON and SARIF reports |
@@ -140,7 +141,7 @@ Tips for free tiers
 | `--client-name`, `--consultant-name`, `--consultant-contact` | Report header |
 | `--fail-under SCORE` | Exit with code 1 when the score is lower (for CI) |
 
-Exit codes: `0` ok, `1` score below `--fail-under`, `2` usage or authorization error, `3` nothing could be tested.
+Exit codes: `0` ok, `1` score below `--fail-under`, `2` usage or authorization error, `3` nothing could be tested or the run was incomplete.
 
 Other commands: `demo`, `serve-demo`, `list-payloads`.
 
@@ -177,6 +178,12 @@ jobs:
 Inputs: `url`, `authorized` (required), `fail-under` (default 70, empty to never fail on score), `headers`, `body-template`, `response-path`, `system-marker`, `repeat`, `sarif-location`, `upload-sarif`. Run it on a schedule or on demand rather than on every push, because every run sends real requests to your app.
 
 You can also use the exit code directly in any CI system: `python -m prompt_tester scan --url ... --authorized --fail-under 80 --quiet`.
+
+## Incomplete runs
+
+Network problems and provider rate limits (free tiers in particular) can make many requests fail. A score computed from only a few successful tests would be misleading, so the tool checks coverage: if fewer than 80 percent of the runnable tests could run, the run is marked **Incomplete**. The report starts with an INCOMPLETE banner, the JSON has `"incomplete": true` and the coverage numbers, no SARIF file is written, and the exit code is `3` even when `--fail-under` is set, so a CI gate can never pass on a run that mostly failed. Change the threshold with `--min-coverage` (use `0` to turn the check off).
+
+If you see it, run again with a larger `--delay`, more `--retries`, or at another time.
 
 ## How the score works
 

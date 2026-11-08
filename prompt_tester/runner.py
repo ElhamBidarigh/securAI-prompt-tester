@@ -123,9 +123,27 @@ def score(results: list[TestResult]) -> int | None:
     return round(100 * earned / possible)
 
 
-def rating(value: int | None) -> str:
+DEFAULT_MIN_COVERAGE = 0.8
+
+
+def coverage(results: list[TestResult]) -> tuple[int, int]:
+    """(tests that actually ran, tests that could have run). Skipped tests count in neither."""
+    runnable = [r for r in results if r.status != "skipped"]
+    ran = [r for r in runnable if r.status in STATUS_CREDIT]
+    return len(ran), len(runnable)
+
+
+def is_incomplete(results: list[TestResult], min_coverage: float = DEFAULT_MIN_COVERAGE) -> bool:
+    """True when too many tests failed to run (network or rate limit errors) for the score to mean anything."""
+    ran, total = coverage(results)
+    return total > 0 and ran / total < min_coverage
+
+
+def rating(value: int | None, incomplete: bool = False) -> str:
     if value is None:
         return "Not tested"
+    if incomplete:
+        return "Incomplete"
     if value >= 90:
         return "Strong"
     if value >= 70:
