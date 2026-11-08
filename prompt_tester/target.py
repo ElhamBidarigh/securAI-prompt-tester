@@ -145,6 +145,10 @@ class Target:
         url = self.url + sep + urllib.parse.urlencode({self.query_param: prompt})
         return urllib.request.Request(url, headers=headers, method="GET")
 
+    @staticmethod
+    def _retry_note(attempt: int) -> str:
+        return f" (after {attempt} retr{'y' if attempt == 1 else 'ies'})" if attempt else ""
+
     def _wait_before_retry(self, attempt: int, retry_after: str | None) -> None:
         wait = self.retry_wait * (attempt + 1)
         if retry_after:
@@ -155,7 +159,7 @@ class Target:
         time.sleep(min(wait, MAX_RETRY_WAIT))
 
     def send(self, prompt: str) -> TargetResponse:
-        """Send one prompt. Rate limits and temporary server errors are retried a few times."""
+        """Send one prompt. Rate limits, temporary server errors and dropped connections are retried a few times."""
         attempt = 0
         while True:
             req = self._build_request(prompt)
@@ -176,11 +180,23 @@ class Target:
                     pass
                 return TargetResponse(http_status=e.code, error=f"HTTP {e.code}" + (f": {detail}" if detail else ""))
             except urllib.error.URLError as e:
-                return TargetResponse(error=f"connection failed: {e.reason}")
+                if attempt < self.retries:
+                    self._wait_before_retry(attempt, None)
+                    attempt += 1
+                    continue
+                return TargetResponse(error=f"connection failed: {e.reason}" + self._retry_note(attempt))
             except (socket.timeout, TimeoutError):
-                return TargetResponse(error=f"timed out after {self.timeout}s")
-            except OSError as e:
-                return TargetResponse(error=f"network error: {e}")
+                if attempt < self.retries:
+                    self._wait_before_retry(attempt, None)
+                    attempt += 1
+                    continue
+                return TargetResponse(error=f"timed out after {self.timeout}s" + self._retry_note(attempt))
+            except OSError as e:  # includes connection resets such as WinError 10054
+                if attempt < self.retries:
+                    self._wait_before_retry(attempt, None)
+                    attempt += 1
+                    continue
+                return TargetResponse(error=f"network error: {e}" + self._retry_note(attempt))
         try:
             text = extract_text(body, self.response_path)
         except TargetError as e:

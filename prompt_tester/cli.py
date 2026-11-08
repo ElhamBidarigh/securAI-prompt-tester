@@ -63,6 +63,10 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--repeat", type=int, default=1, help="Send each payload this many times (models vary). Default 1.")
     s.add_argument("--delay", type=float, default=0.5, help="Seconds to wait between requests. Default 0.5.")
     s.add_argument("--timeout", type=float, default=30.0, help="Seconds before a request times out. Default 30.")
+    s.add_argument("--retries", type=int, default=2,
+                   help="How many times to retry a request after a rate limit, server error or dropped connection. Default 2.")
+    s.add_argument("--retry-wait", type=float, default=1.5,
+                   help="Base wait in seconds before a retry (it grows with each retry). Default 1.5.")
     s.add_argument("--authorized", action="store_true",
                    help="Confirm you own this app or have written permission to test it. Required for non-local URLs.")
     s.add_argument("--out", default=None, help="Write the Markdown report to this file.")
@@ -119,7 +123,8 @@ def _progress(quiet: bool):
         return None
 
     def show(i, total, r):
-        print(f"[{i:>2}/{total}] {r.id} {r.name}: {r.status}", file=sys.stderr)
+        reason = f" ({r.error[:110]})" if r.status == "error" and r.error else ""
+        print(f"[{i:>2}/{total}] {r.id} {r.name}: {r.status}{reason}", file=sys.stderr)
     return show
 
 
@@ -141,13 +146,15 @@ def _resolve_target(args):
         cfg = build_preset(args.preset, args.model, system_prompt, api_key,
                            max_tokens=args.max_tokens, url=args.url)
         target = Target(cfg.url, headers=cfg.headers, body_template=cfg.body_template,
-                        response_path=cfg.response_path, timeout=args.timeout)
+                        response_path=cfg.response_path, timeout=args.timeout,
+                        retries=args.retries, retry_wait=args.retry_wait)
         return target, cfg.url, markers
     if not args.url:
         raise TargetError("give --url, or use --preset openai / --preset anthropic")
     target = Target(args.url, method=args.method, headers=_parse_headers(args.header),
                     body_template=_load_template(args), response_path=args.response_path,
-                    query_param=args.query_param, timeout=args.timeout)
+                    query_param=args.query_param, timeout=args.timeout,
+                    retries=args.retries, retry_wait=args.retry_wait)
     return target, args.url, markers
 
 
@@ -194,6 +201,10 @@ def _finish(label: str, results, args) -> int:
         first = next((r.error for r in results if r.error), "")
         print("[prompt-tester] nothing could be tested. Check the URL, headers and body template."
               + (f" First error: {first}" if first else ""), file=sys.stderr)
+        if any(w in first for w in ("network error", "connection failed", "timed out")):
+            print("[prompt-tester] This looks like a network problem, not a problem with the app. Try "
+                  "--delay 5 --retries 4, and check whether a proxy is set: "
+                  "python -c \"import urllib.request as u; print(u.getproxies())\"", file=sys.stderr)
         return 3
     fail_under = getattr(args, "fail_under", None)
     if fail_under is not None and value < fail_under:

@@ -10,7 +10,8 @@ All notable changes to this project are listed here. The format follows Keep a C
 - An empty reply (for example a reasoning model that used its whole token limit while thinking) is now reported as an error with a hint, instead of counting as a passed test.
 - SARIF 2.1.0 output with `--sarif-out` and `--sarif-location`, for GitHub Code Scanning.
 - A reusable GitHub Action (`action.yml`) that runs the tests, uploads SARIF, writes the report to the job summary and fails the job below a score. It refuses to run unless `authorized: true` is set.
-- Retries for rate limits and temporary server errors (HTTP 429, 500, 502, 503, 504, 529).
+- Retries for rate limits, temporary server errors (HTTP 429, 500, 502, 503, 504, 529) and dropped connections or timeouts, with `--retries` and `--retry-wait`.
+- The progress lines show why a test failed (for example the HTTP status or the network error), and a network hint is printed when nothing could be tested.
 - Provider error messages are shown when a request fails, so a wrong model name or key is easy to spot.
 - Example system prompts (`examples/system_prompt_baseline.txt` and `examples/system_prompt_hardened.txt`).
 - `SECURITY.md`, PyPI packaging metadata and a tag-triggered release workflow (see `docs/RELEASING.md`).

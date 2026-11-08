@@ -133,6 +133,7 @@ Tips for free tiers
 | `--category`, `--only PI-001` | Run a subset |
 | `--payloads file.json` | Use your own payload set |
 | `--repeat N`, `--delay S`, `--timeout S` | Repeats, pause between requests, request timeout |
+| `--retries N`, `--retry-wait S` | Retries after a rate limit, server error or dropped connection (default 2, 1.5 s) |
 | `--preset openai/anthropic/openai-compatible`, `--model`, `--system-prompt-file`, `--max-tokens`, `--api-key-env` | Test a hosted model API directly |
 | `--out`, `--json-out`, `--sarif-out` | Write the Markdown, JSON and SARIF reports |
 | `--sarif-location FILE` | Repo file the SARIF alerts point at (default README.md) |

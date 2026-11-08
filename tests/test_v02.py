@@ -26,8 +26,9 @@ REFUSAL = "I can only help with Acme products and I can't follow instructions in
 class FakeApi:
     """A tiny local server that speaks the OpenAI or Anthropic response shape and records requests."""
 
-    def __init__(self, shape, fail_first=0, fail_status=429, error_body=None, reply=None):
+    def __init__(self, shape, fail_first=0, fail_status=429, error_body=None, reply=None, reset_first=0):
         self.shape = shape
+        self.reset_first = reset_first
         self.reply = REFUSAL if reply is None else reply
         self.requests = []
         self.fail_first = fail_first
@@ -42,6 +43,10 @@ class FakeApi:
             def do_POST(self):
                 body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
                 outer.requests.append({"path": self.path, "headers": dict(self.headers), "body": body})
+                if len(outer.requests) <= outer.reset_first:
+                    self.close_connection = True
+                    self.connection.close()  # drop the connection without answering, like WinError 10054
+                    return
                 if len(outer.requests) <= outer.fail_first or outer.error_body:
                     code = outer.fail_status if not outer.error_body else 400
                     payload = json.dumps(outer.error_body or {"error": "slow down"}).encode()
@@ -284,6 +289,59 @@ class TestEmptyReplies(unittest.TestCase):
         self.assertIn("--max-tokens", err)
 
 
+class TestDroppedConnections(unittest.TestCase):
+    def make(self, api, **kw):
+        cfg = build_preset("openai-compatible", "m", "S", "K", url=api.url)
+        return Target(cfg.url, headers=cfg.headers, body_template=cfg.body_template,
+                      response_path=cfg.response_path, **kw)
+
+    def test_dropped_connections_are_retried_then_succeed(self):
+        api = FakeApi("openai", reset_first=2)
+        self.addCleanup(api.close)
+        resp = self.make(api, retries=2, retry_wait=0).send("hello")
+        self.assertIsNone(resp.error)
+        self.assertEqual(resp.text, REFUSAL)
+        self.assertEqual(len(api.requests), 3)
+
+    def test_gives_up_with_a_clear_message_after_the_retries(self):
+        api = FakeApi("openai", reset_first=10)
+        self.addCleanup(api.close)
+        resp = self.make(api, retries=1, retry_wait=0).send("hello")
+        self.assertIn("after 1 retry", resp.error)
+        self.assertEqual(len(api.requests), 2)
+
+    def test_zero_retries_means_one_attempt(self):
+        api = FakeApi("openai", reset_first=10)
+        self.addCleanup(api.close)
+        resp = self.make(api, retries=0).send("hello")
+        self.assertIsNotNone(resp.error)
+        self.assertEqual(len(api.requests), 1)
+
+    def test_progress_line_shows_the_reason_and_cli_gives_a_network_hint(self):
+        api = FakeApi("openai", reset_first=100)
+        self.addCleanup(api.close)
+        tmp = tempfile.mkdtemp()
+        code, _, err = run_cli("scan", "--preset", "openai-compatible", "--model", "m", "--url", api.url,
+                               "--authorized", "--delay", "0", "--retries", "1", "--retry-wait", "0",
+                               "--only", "PI-001", "--out", os.path.join(tmp, "r.md"), env={"LLM_API_KEY": "k"})
+        self.assertEqual(code, 3)
+        self.assertIn("PI-001 Plain instruction override: error (", err)
+        self.assertIn("network problem", err)
+        self.assertIn("getproxies", err)
+
+    def test_cli_retries_flag_recovers_from_resets(self):
+        api = FakeApi("openai", reset_first=2)
+        self.addCleanup(api.close)
+        tmp = tempfile.mkdtemp()
+        code, _, _ = run_cli("scan", "--preset", "openai-compatible", "--model", "m", "--url", api.url,
+                             "--authorized", "--delay", "0", "--retries", "3", "--retry-wait", "0",
+                             "--only", "PI-001", "--quiet", "--out", os.path.join(tmp, "r.md"),
+                             "--json-out", os.path.join(tmp, "r.json"), env={"LLM_API_KEY": "k"})
+        self.assertEqual(code, 0)
+        data = json.loads(Path(tmp, "r.json").read_text(encoding="utf-8"))
+        self.assertEqual(data["results"][0]["status"], "resisted")
+
+
 class TestSarif(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -315,7 +373,7 @@ class TestSarif(unittest.TestCase):
 
     def test_no_sarif_file_when_nothing_could_be_tested(self):
         tmp = tempfile.mkdtemp()
-        code, _, _ = run_cli("scan", "--url", "http://127.0.0.1:1/none", "--timeout", "1", "--delay", "0", "--quiet",
+        code, _, _ = run_cli("scan", "--url", "http://127.0.0.1:1/none", "--timeout", "1", "--delay", "0", "--quiet", "--retry-wait", "0",
                              "--only", "PI-001", "--sarif-out", os.path.join(tmp, "o.sarif"),
                              "--out", os.path.join(tmp, "r.md"))
         self.assertEqual(code, 3)

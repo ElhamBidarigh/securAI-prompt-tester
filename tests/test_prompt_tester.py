@@ -115,7 +115,7 @@ class TestTarget(unittest.TestCase):
         self.assertFalse(is_local_url("https://example.com/x"))
 
     def test_connection_error_is_reported_not_raised(self):
-        resp = Target("http://127.0.0.1:1/none", timeout=2).send("hi")
+        resp = Target("http://127.0.0.1:1/none", timeout=2, retry_wait=0).send("hi")
         self.assertIsNotNone(resp.error)
         self.assertIsNone(resp.text)
 
@@ -250,7 +250,7 @@ class TestCli(unittest.TestCase):
 
     def test_unreachable_target_exits_3(self):
         code = cli.main(["scan", "--url", "http://127.0.0.1:1/x", "--timeout", "1", "--delay", "0",
-                         "--quiet", "--only", "PI-001", "--out", str(Path(tempfile.mkdtemp()) / "r.md")])
+                         "--quiet", "--retry-wait", "0", "--only", "PI-001", "--out", str(Path(tempfile.mkdtemp()) / "r.md")])
         self.assertEqual(code, 3)
 
 
