@@ -2,7 +2,7 @@
 
 [![Tests](https://github.com/ElhamBidarigh/securAI-prompt-tester/actions/workflows/tests.yml/badge.svg)](https://github.com/ElhamBidarigh/securAI-prompt-tester/actions/workflows/tests.yml)
 
-🇮🇷 [راهنمای فارسی](README.fa.md)
+🇮🇷 [راهنمای فارسی](https://github.com/ElhamBidarigh/securAI-prompt-tester/blob/main/README.fa.md)
 
 A quick prompt injection resistance check for LLM-powered apps. Point it at a chat endpoint, it sends 21 safe, well-known attack prompts, and it writes a plain-language report with a 0 to 100 resistance score.
 
@@ -30,6 +30,15 @@ Mature red-teaming frameworks already exist (garak, Promptfoo, PyRIT and others)
 
 ## Install
 
+From PyPI:
+
+```bash
+pip install securai-prompt-tester
+prompt-tester --help
+```
+
+From source:
+
 ```bash
 git clone https://github.com/ElhamBidarigh/securAI-prompt-tester.git
 cd securAI-prompt-tester
@@ -37,8 +46,6 @@ python -m prompt_tester --help          # works with no install at all
 # or install the command:
 pip install -e .
 ```
-
-You can also install straight from GitHub: `pip install "git+https://github.com/ElhamBidarigh/securAI-prompt-tester.git"`.
 
 Requires Python 3.10 or newer. There are no third-party dependencies.
 
@@ -48,7 +55,7 @@ Requires Python 3.10 or newer. There are no third-party dependencies.
 python -m prompt_tester demo
 ```
 
-This starts three bundled fake chat apps on your own machine (one vulnerable, one partly vulnerable, one hardened), tests all three and writes sample reports to `examples/`. The demo apps are simulations, not real language models. See [`examples/sample_report_mixed.md`](examples/sample_report_mixed.md).
+This starts three bundled fake chat apps on your own machine (one vulnerable, one partly vulnerable, one hardened), tests all three and writes sample reports to `examples/`. The demo apps are simulations, not real language models. See [`examples/sample_report_mixed.md`](https://github.com/ElhamBidarigh/securAI-prompt-tester/blob/main/examples/sample_report_mixed.md).
 
 ## Test your own app
 
@@ -86,7 +93,7 @@ python -m prompt_tester scan --authorized \
 ```
 
 - `--model` is required. Copy the exact name from your provider's documentation.
-- Without `--system-prompt-file`, a built-in support-bot prompt is used ([`examples/system_prompt_baseline.txt`](examples/system_prompt_baseline.txt)) and the leak tests are switched on automatically. To test your own prompt, pass `--system-prompt-file my_prompt.txt --system-marker "a phrase from it"`.
+- Without `--system-prompt-file`, a built-in support-bot prompt is used ([`examples/system_prompt_baseline.txt`](https://github.com/ElhamBidarigh/securAI-prompt-tester/blob/main/examples/system_prompt_baseline.txt)) and the leak tests are switched on automatically. To test your own prompt, pass `--system-prompt-file my_prompt.txt --system-marker "a phrase from it"`.
 - To see how much a defensive prompt helps, run the same model twice, once with `examples/system_prompt_baseline.txt` and once with `examples/system_prompt_hardened.txt`.
 - The key is read from `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`, or from the variable you name with `--api-key-env`. It is sent only in the request header and never appears in a report, SARIF file or console output.
 - The result describes the combination of model and system prompt you tested, not the model in general.
@@ -211,14 +218,14 @@ prompt_tester/
   payloads.py      21 built-in payloads and the loader for custom ones
   detectors.py     deterministic verdict logic
   target.py        HTTP client, retries, body templates, response extraction
-  presets.py       OpenAI and Anthropic request builders
+  presets.py       OpenAI, Anthropic and OpenAI-compatible request builders
   runner.py        runs the tests, aggregates, scores
   report.py        Markdown and JSON reports
   sarif.py         SARIF 2.1.0 export
   demo_server.py   three bundled fake chat apps for demos and tests
   cli.py           command line interface
 action.yml         reusable GitHub Action
-tests/             51 tests, standard library only
+tests/             68 tests, standard library only
 examples/          sample reports and two example system prompts
 SECURITY.md, CHANGELOG.md, docs/RELEASING.md
 ```
@@ -231,7 +238,7 @@ New payloads are welcome, especially ones for attack types not covered here. Eac
 
 ## License
 
-MIT, see [LICENSE](LICENSE).
+MIT, see [LICENSE](https://github.com/ElhamBidarigh/securAI-prompt-tester/blob/main/LICENSE).
 
 ## Author
 

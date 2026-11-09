@@ -10,3 +10,7 @@ dist/
 reports/
 client_*.md
 client_*.json
+
+# local test environments
+test-env/
+*-env/
